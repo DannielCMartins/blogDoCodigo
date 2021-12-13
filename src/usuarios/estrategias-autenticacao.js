@@ -7,11 +7,20 @@ const Usuario = require('./usuarios-modelo');
 const { InvalidArgumentError } = require('../erros');
 
 const bcrypt = require('bcrypt');
+
 const jwt = require('jsonwebtoken');
+const blocklist = require('../../redis/manipula-blocklist');
 
 function verificaUsuario(usuario) {
   if (!usuario) {
     throw new InvalidArgumentError('Não existe usuário com esse e-mail!');
+  }
+}
+
+async function verificaTokenNaBlocklist(token) {
+  const tokenNaBlocklist = await blocklist.contemToken(token);
+  if (tokenNaBlocklist) {
+    throw new jwt.JsonWebTokenError('Token inválido por logout!');
   }
 }
 
@@ -27,7 +36,7 @@ passport.use(
     {
       usernameField: 'email',
       passwordField: 'senha',
-      session: false
+      session: false,
     },
     async (email, senha, done) => {
       try {
@@ -44,15 +53,14 @@ passport.use(
 );
 
 passport.use(
-  new BearerStrategy(
-    async (token, done) => {
-      try {
-        const payload = jwt.verify(token, process.env.CHAVE_JWT);
-        const usuario = await Usuario.buscaPorId(payload.id);
-        done(null, usuario);
-      } catch (erro) {
-        done(erro);
-      }      
+  new BearerStrategy(async (token, done) => {
+    try {
+      await verificaTokenNaBlocklist(token);
+      const payload = jwt.verify(token, process.env.CHAVE_JWT);
+      const usuario = await Usuario.buscaPorId(payload.id);
+      done(null, usuario, { token });
+    } catch (erro) {
+      done(erro);
     }
-  )
-)
+  })
+);
